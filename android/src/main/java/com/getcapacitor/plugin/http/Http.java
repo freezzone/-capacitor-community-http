@@ -131,49 +131,53 @@ public class Http extends Plugin {
 
     @PluginMethod
     public void downloadFile(final PluginCall call) {
-        try {
-            bridge.saveCall(call);
-            String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
+        Runnable asyncHttpCall = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
 
-            if (
-                !FilesystemUtils.isPublicDirectory(fileDirectory) ||
-                isStoragePermissionGranted(call, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            ) {
-                call.release(bridge);
-
-                HttpRequestHandler.ProgressEmitter emitter = new HttpRequestHandler.ProgressEmitter() {
-                    @Override
-                    public void emit(Integer bytes, Integer contentLength) {
-                        // no-op
-                    }
-                };
-                Boolean progress = call.getBoolean("progress", false);
-                if (progress) {
-                    emitter =
-                        new HttpRequestHandler.ProgressEmitter() {
+                    if (
+                        !FilesystemUtils.isPublicDirectory(fileDirectory) ||
+                        isStoragePermissionGranted(call, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    ) {
+                        HttpRequestHandler.ProgressEmitter emitter = new HttpRequestHandler.ProgressEmitter() {
                             @Override
-                            public void emit(final Integer bytes, final Integer contentLength) {
-                                JSObject ret = new JSObject();
-                                ret.put("type", "DOWNLOAD");
-                                ret.put("url", call.getString("url"));
-                                ret.put("bytes", bytes);
-                                ret.put("contentLength", contentLength);
-
-                                notifyListeners("progress", ret);
+                            public void emit(Integer bytes, Integer contentLength) {
+                                // no-op
                             }
                         };
-                }
+                        Boolean progress = call.getBoolean("progress", false);
+                        if (progress) {
+                            emitter =
+                                new HttpRequestHandler.ProgressEmitter() {
+                                    @Override
+                                    public void emit(final Integer bytes, final Integer contentLength) {
+                                        JSObject ret = new JSObject();
+                                        ret.put("type", "DOWNLOAD");
+                                        ret.put("url", call.getString("url"));
+                                        ret.put("bytes", bytes);
+                                        ret.put("contentLength", contentLength);
 
-                JSObject response = HttpRequestHandler.downloadFile(call, getContext(), emitter);
-                call.resolve(response);
+                                        notifyListeners("progress", ret);
+                                    }
+                                };
+                        }
+
+                        JSObject response = HttpRequestHandler.downloadFile(call, getContext(), emitter);
+                        call.resolve(response);
+                    }
+                } catch (MalformedURLException ex) {
+                    call.reject("Invalid URL", ex);
+                } catch (IOException ex) {
+                    call.reject("IO Error", ex);
+                } catch (Exception ex) {
+                    call.reject("Error", ex);
+                }
             }
-        } catch (MalformedURLException ex) {
-            call.reject("Invalid URL", ex);
-        } catch (IOException ex) {
-            call.reject("IO Error", ex);
-        } catch (Exception ex) {
-            call.reject("Error", ex);
-        }
+        };
+        Thread httpThread = new Thread(asyncHttpCall);
+        httpThread.start();
     }
 
     @PluginMethod
